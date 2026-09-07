@@ -2,7 +2,7 @@
 
 ## 1. Scope and conventions
 
-This is a derived educational 90-degree cross-plane V8 configuration, not recovered source code and not an OEM specification. It guarantees a coherent rigid slider-crank mechanism under the stated assumptions. It does not model combustion dynamics, bearing forces, flex, friction, valve float, or manufacturing tolerances.
+This is a derived educational 90-degree cross-plane V8 configuration, not recovered source code and not an OEM specification. It defines a coherent rigid slider-crank mechanism under the stated assumptions. It does not model combustion dynamics, bearing forces, flex, friction, valve float, or manufacturing tolerances.
 
 Use SI units internally: meters, seconds, radians, pascals, and cubic meters. External/UI angles may be degrees, but convert only at explicit boundaries. Define `mod(x,n) = ((x % n) + n) % n`; JavaScript remainder is not a positive modulo operation for negative inputs.
 
@@ -38,14 +38,33 @@ Cylinder bores are offset along Z to accommodate the two side-by-side rods on ea
 
 ## 3. Shared crankshaft geometry and firing table
 
-Let Theta be the increasing global crank phase in degrees. Physical journal angle is:
+Let Theta be the increasing global crank phase in degrees. Journal angle, measured from +Y toward +X, is:
 
 ```text
 alpha_j(Theta) = alpha0_j - Theta
 p_j.xy = (r * sin(alpha_j), r * cos(alpha_j))
 ```
 
-Trigonometric functions receive radians. The minus sign is intentional. Use this same rotation convention for the crank mesh, journals, rods, and cam; do not rotate a visual shaft in the opposite direction from the solver.
+Trigonometric functions receive radians. The minus sign belongs to this particular alpha-angle convention. It is NOT an instruction to apply a negative Three.js Euler Z rotation. Use the explicit conversion below so the mesh and solver agree.
+
+### Solver-to-render rotation conversion
+
+Standard right-handed rotation about +Z obeys:
+
+```text
+Rz(t) * (sin(a), cos(a)) = (sin(a-t), cos(a-t))
+```
+
+Therefore, when the crank geometry is authored at its angle-zero journal positions `(r*sin(alpha0), r*cos(alpha0), z)`, the correct parent mesh Euler rotation is:
+
+```ts
+crankGroup.rotation.z = degreesToRadians(Theta);       // POSITIVE
+camGroup.rotation.z = degreesToRadians(Theta / 2);     // POSITIVE
+```
+
+The corresponding journal alpha decreases by Theta, and each cam lobe's alpha decreases by Theta/2. These are the same physical rotations expressed in different angular conventions. A bank component authored along local +Y uses `rotation.z = -beta` to point along u(beta). Alternatively, orient it by a tested quaternion from its authored axis to u.
+
+Bake static journal/lobe offsets once or apply them as static local transforms, not both. Do not give rods the crank rotation as an inherited transform and also apply a world-space solved rod pose. Add a test that applies the actual render rotation matrix to authored journal centers and compares the resulting world points with the solver. This conversion was separately numerically checked during planning; it must still be reproduced in implementation tests.
 
 Front-to-rear journal starting angles are `[-45, -135, +45, +135]` degrees. Four different quadrature orientations make this a cross-plane configuration. Each journal is shared by one cylinder from each bank.
 
@@ -113,7 +132,7 @@ lift = 0 otherwise
 
 Exhaust uses a=180, b=360. Intake uses a=360, b=540. This excludes valve overlap and ignition advance deliberately. It is not an OEM cam profile. Peak lift occurs at local phi=270 for exhaust and phi=450 for intake.
 
-The camshaft rotates at half crank speed: physical rotation `-Theta/2`, plus fixed lobe offsets. Derive lobe orientations against each follower's actual contact direction so the lobe's peak agrees with the matching valve-lift maximum. Do not rotate decorative lobes at half speed while opening unrelated valves on a separate clock. A simplified cam/follower/rocker construction is acceptable if its linkage assumptions are stated and visible parts agree; exact contact-surface and elasticity simulation is not required.
+The camshaft rotates at half crank speed: its lobe alpha angles decrease by Theta/2, equivalent to a positive Theta/2 Euler Z rotation of an angle-zero-authored cam mesh as explained in section 3. Derive fixed lobe orientations against each follower's actual contact direction so the lobe's peak agrees with the matching valve-lift maximum. Do not rotate decorative lobes at half speed while opening unrelated valves on a separate clock. A simplified cam/follower/rocker construction is acceptable if its linkage assumptions are stated and visible parts agree; exact contact-surface and elasticity simulation is not required.
 
 Use 16 valves, with corresponding simplified springs, rockers, pushrods, and lifters. Both the visible valve transform and lift chart consume the same function. The named stroke is a cycle interval; UI text should distinguish an interval label from a valve being exactly seated at its boundary.
 
@@ -156,6 +175,6 @@ RPM changes time traversal only; it does not alter this curve. Do not compute or
 
 ## 8. Required mechanical test invariants
 
-Test piston travel bounds `[0,2r]`, TDC/BDC values, 360-degree mechanical periodicity, 720-degree cycle periodicity, rod length, shared-journal endpoints, bank-axis confinement, finite outputs, and phase-table TDC consistency. Test exactly eight firing events in a complete half-open 720-degree cycle and uniform 90-degree event spacing, without duplicating an endpoint. Test valve lift bounds, seated boundaries, half-speed cam phase, volume bounds, and pressure/volume unit conversions.
+Test piston travel bounds `[0,2r]`, TDC/BDC values, 360-degree mechanical periodicity, 720-degree cycle periodicity, rod length, shared-journal endpoints, bank-axis confinement, finite outputs, and phase-table TDC consistency. Test actual render-matrix journal points against solver points, including the alpha-to-Euler sign conversion. Test exactly eight firing events in a complete half-open 720-degree cycle and uniform 90-degree event spacing, without duplicating an endpoint. Test valve lift bounds, seated boundaries, half-speed cam phase, volume bounds, and pressure/volume unit conversions.
 
 Integration tests must compare all displayed/scene values with one snapshot at selected phases, including wraparound. Rendering a plausible screenshot is not evidence that these equations are implemented correctly. Passing these equations does not replace an inspection of collisions, ring/skirt alignment, crank web layout, or exploded assembly geometry.
